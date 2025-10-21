@@ -32,10 +32,11 @@ UMBRAL_FINAL = 70
 # Fechas Fijas
 START_DATE_FIXED = '2025-01-02' 
 END_DATE_FIXED = datetime.now().strftime('%Y-%m-%d')
+TODAY_DATE = datetime.now().strftime('%Y-%m-%d') # Nueva variable para la fecha actual
 
 # Parámetros para la BARRA DE RIESGO
-Y_BAR_BOTTOM_FIXED = 75.0 # Fondo fijo de la barra (debajo de la línea de capital)
-MAX_BAR_HEIGHT = 10.0 # Altura máxima para cuando el score es MAX_SCORE (84)
+Y_BAR_BOTTOM_FIXED = 75.0 
+MAX_BAR_HEIGHT = 10.0 
 
 # Umbrales (Se mantienen)
 UMBRALES = {
@@ -99,17 +100,20 @@ def calcular_score_total(row: pd.Series, ponderaciones_actuales: dict) -> int:
 
 def interpretar_score_actual(score: int, max_score: int) -> tuple:
     """Traduce el score numérico a un estado operativo con el formato solicitado."""
+    # Score máximo es ahora un entero
+    max_score_int = int(max_score) 
+    
     if score >= 70:
         estado = "LOW RISK / BUY"
-        mensaje = f"GREEN ZONE for SPX\nDEYCO Score: {score} / {max_score}"
+        mensaje = f"GREEN ZONE for SPX\nDEYCO Score: {score} / {max_score_int}\nDate: {TODAY_DATE}"
         color = "#28a745" # Verde
     elif score >= 56:
         estado = "HIGH RISK / STAND ASIDE"
-        mensaje = f"YELLOW ZONE for SPX\nDEYCO Score: {score} / {max_score}"
+        mensaje = f"YELLOW ZONE for SPX\nDEYCO Score: {score} / {max_score_int}\nDate: {TODAY_DATE}"
         color = "#ffc107" # Amarillo/Naranja
     else: 
         estado = "EXTREME RISK / SELL"
-        mensaje = f"RED ZONE for SPX\nDEYCO Score: {score} / {max_score}"
+        mensaje = f"RED ZONE for SPX\nDEYCO Score: {score} / {max_score_int}\nDate: {TODAY_DATE}"
         color = "#dc3545" # Rojo
     return estado, mensaje, color
 
@@ -175,8 +179,6 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
     df['M2_Crecimiento_YoY'] = df.get('M2_Crecimiento_YoY_BASE', pd.Series(0.0, index=df.index)).pct_change(periods=12) * 100
     df['HY_Spread'] = df.get('BAA', pd.Series(0.0, index=df.index)) - df.get('AAA', pd.Series(0.0, index=df.index))
     
-    # La limpieza final se mueve a main() para manejar la imputación de fines de semana.
-    
     return df.drop(columns=['M2_Crecimiento_YoY_BASE', 'BAA', 'AAA'], errors='ignore')
 
 # ======================================================================
@@ -186,6 +188,7 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
 def main():
     
     # --- INYECCIÓN DE CSS PARA EL TÍTULO Y EL COLOR DE LA TABLA ---
+    # Se añade estilo para colorear los títulos de la tabla
     st.markdown(
         """
         <style>
@@ -206,6 +209,16 @@ def main():
         }
         .stTable th, .stTable td, .stDataFrame th, .stDataFrame td {
             color: #333333 !important; 
+        }
+        /* Nuevo: Color del encabezado de la tabla (igual que Key Performance Metrics) */
+        .st-emotion-cache-p5m94t th {
+            color: #ff4b4b !important; /* Streamlit usa este color para encabezados por defecto, usaremos un color fijo */
+            color: #FAFAFA !important;
+            background-color: #333333 !important;
+        }
+        .st-emotion-cache-12fmwz3 th {
+            color: #FAFAFA !important;
+            background-color: #333333 !important;
         }
         </style>
         <h1 class="centered-title">DEYCO Risk Score v2.0</h1>
@@ -242,11 +255,12 @@ def main():
     full_date_range = pd.to_datetime(pd.date_range(start=START_DATE_FIXED, end=END_DATE_FIXED))
     
     # 2. Reindexar y rellenar solo las variables de Score y Equity (para la gráfica)
-    df_full_plot = df_data[['Risk_Score', 'Strategy_Equity', 'B&H_Equity']].reindex(full_date_range)
+    # Reindexamos TODAS las columnas necesarias, incluyendo las de Equity
+    cols_to_plot = ['Risk_Score', 'Strategy_Equity', 'B&H_Equity']
+    df_full_plot = df_data[cols_to_plot].reindex(full_date_range)
     
     # 3. Rellenar Score y Equity: el score y el equity se mantienen iguales durante fines de semana y feriados.
-    # Esto es CRÍTICO para eliminar los gaps en la barra de riesgo.
-    df_full_plot[['Risk_Score', 'Strategy_Equity', 'B&H_Equity']] = df_full_plot[['Risk_Score', 'Strategy_Equity', 'B&H_Equity']].ffill()
+    df_full_plot[cols_to_plot] = df_full_plot[cols_to_plot].ffill()
     
     # 4. Calcular el Color y la Altura para el DataFrame completo (incluyendo fines de semana)
     df_full_plot['Score_Color'] = df_full_plot['Risk_Score'].apply(map_score_to_color)
@@ -260,7 +274,7 @@ def main():
     ultimo_score = df_data['Risk_Score'].iloc[-1]
     estado_operativo, mensaje_operativo, color = interpretar_score_actual(ultimo_score, MAX_SCORE)
     
-    # Mostrar el score con formato de semáforo
+    # Mostrar el score con formato de semáforo (incluye la fecha y el score corregido)
     st.markdown(
         f"""
         <div style="background-color: {color}; padding: 25px; border-radius: 10px; color: white;">
@@ -277,10 +291,7 @@ def main():
     
     fig, ax = plt.subplots(figsize=(12, 6))
     
-    # --- Lógica de la Barra de Riesgo (Corregida y Mejorada) ---
-    
-    # 1. Plotear una barra discreta por cada día (incluyendo fines de semana) con color y altura variable
-    # Usamos ancho 1.0 y alineación al borde. La continuidad se asegura al usar el df_full_plot
+    # --- Lógica de la Barra de Riesgo ---
     ax.bar(
         df_full_plot.index, 
         height=df_full_plot['Bar_Height'], 
@@ -291,11 +302,10 @@ def main():
         edgecolor='none'
     )
     
-    # 2. Ajustar el límite inferior del eje Y para que incluya la barra y un margen
-    # Esto soluciona la superposición (el SPX cae hasta 90, la barra empieza en 75)
+    # Ajuste de límites Y
     ax.set_ylim(bottom=Y_BAR_BOTTOM_FIXED - 5, top=df_full_plot[['Strategy_Equity', 'B&H_Equity']].max().max() * 1.05)
     
-    # 3. Agregar una etiqueta para identificar la barra
+    # Etiqueta de la barra
     ax.text(
         df_full_plot.index[0], 
         Y_BAR_BOTTOM_FIXED - 2.5, 
@@ -307,9 +317,42 @@ def main():
     
     # --------------------------------------------------
     
-    # Gráfica del Equity (Usamos df_full_plot para asegurar que las curvas de equity también tengan ffill en días sin datos, lo cual es estándar en gráficos de rendimiento)
-    ax.plot(df_full_plot['Strategy_Equity'], label="DEYCO INDEX", color='green', linewidth=2.5)
-    ax.plot(df_full_plot['B&H_Equity'], label="SPX (Buy & Hold)", color='red', linestyle='--', linewidth=1.5)
+    # Gráfica del Equity
+    line_deyco, = ax.plot(df_full_plot['Strategy_Equity'], label="DEYCO INDEX", color='green', linewidth=2.5)
+    line_spx, = ax.plot(df_full_plot['B&H_Equity'], label="SPX (Buy & Hold)", color='red', linestyle='--', linewidth=1.5)
+    
+    # --- Puntos Finales y Valores (NUEVO) ---
+    
+    # Obtener el último punto y valor
+    last_date = df_full_plot.index[-1]
+    
+    # DEYCO INDEX
+    last_deyco_equity = df_full_plot['Strategy_Equity'].iloc[-1]
+    ax.plot(last_date, last_deyco_equity, 'o', color=line_deyco.get_color(), markersize=line_deyco.get_linewidth() * 2)
+    ax.text(
+        last_date, 
+        last_deyco_equity, 
+        f' ${last_deyco_equity:,.0f}', 
+        fontsize=10, 
+        color=line_deyco.get_color(),
+        ha='left',
+        va='center'
+    )
+    
+    # SPX (Buy & Hold)
+    last_spx_equity = df_full_plot['B&H_Equity'].iloc[-1]
+    ax.plot(last_date, last_spx_equity, 'o', color='red', markersize=line_spx.get_linewidth() * 2)
+    ax.text(
+        last_date, 
+        last_spx_equity, 
+        f' ${last_spx_equity:,.0f}', 
+        fontsize=10, 
+        color='red',
+        ha='left',
+        va='center'
+    )
+    
+    # -----------------------------------------
     
     # Formato de la gráfica
     ax.set_title(f'SPX vs DEYCO INDEX Performance', fontsize=16)
@@ -327,7 +370,7 @@ def main():
     st.markdown("---") 
 
     # ======================================================================
-    # Cuadro de Métricas (Usando el df original, solo días hábiles)
+    # Cuadro de Métricas
     # ======================================================================
     st.header("Key Performance Metrics")
     
@@ -355,6 +398,10 @@ def main():
     df_metrics = pd.DataFrame(data_metrics).set_index('Metrics')
     
     st.table(df_metrics)
+
+    # --- Copyright (NUEVO) ---
+    st.markdown(f"Both DYCO and DYCO INDEX were developed by DELGADO & COMPANY.")
+    st.markdown(f"Copyright {datetime.now().year}. ©")
 
 
 if __name__ == "__main__":
