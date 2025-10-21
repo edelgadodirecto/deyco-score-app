@@ -33,9 +33,9 @@ UMBRAL_FINAL = 70
 START_DATE_FIXED = '2025-01-02' 
 END_DATE_FIXED = datetime.now().strftime('%Y-%m-%d')
 
-# Parámetros para la BARRA DE RIESGO (Ajustados para separación)
-Y_BAR_BOTTOM_FIXED = 75.0 # Nuevo fondo fijo, más bajo
-MAX_BAR_HEIGHT = 10.0 # Altura máxima cuando el score es MAX_SCORE (84)
+# Parámetros para la BARRA DE RIESGO
+Y_BAR_BOTTOM_FIXED = 75.0 # Fondo fijo de la barra (debajo de la línea de capital)
+MAX_BAR_HEIGHT = 10.0 # Altura máxima para cuando el score es MAX_SCORE (84)
 
 # Umbrales (Se mantienen)
 UMBRALES = {
@@ -158,7 +158,7 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
             
     # 4. LIMPIEZA CRÍTICA Y RELLENO PARA FORZAR LA FECHA DE INICIO
     
-    # 4.1. Definir rango de fechas y reindexar (añade NaNs antes de la fecha real de inicio de datos)
+    # 4.1. Definir rango de fechas hábiles y reindexar (añade NaNs antes de la fecha real de inicio de datos)
     date_range = pd.to_datetime(pd.bdate_range(start=start_date, end=end_date))
     df = df.reindex(date_range)
     
@@ -170,15 +170,12 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
     df['Momentum_SPY'] = (df['SPX_Price'].pct_change(periods=5) * 100).fillna(0)
     
     # 4.4. Limpieza de indicadores restantes
-    # Rellenar FRED y otros NaNs. El ffill() es clave para rellenar los días sin datos de FRED
-    # y así asegurar que el Score se mantenga el día siguiente.
+    # Rellenar FRED y otros NaNs. El ffill() es crucial para que el score se mantenga en días sin publicación (lunes-viernes)
     df = df.ffill() 
     df['M2_Crecimiento_YoY'] = df.get('M2_Crecimiento_YoY_BASE', pd.Series(0.0, index=df.index)).pct_change(periods=12) * 100
     df['HY_Spread'] = df.get('BAA', pd.Series(0.0, index=df.index)) - df.get('AAA', pd.Series(0.0, index=df.index))
     
-    # 4.5. Limpieza final de NaNs (solo para asegurar que no queden datos incompletos en el medio)
-    required_keys = [k for k, v in PONDERACIONES_FINALES.items() if v > 0 and k in df.columns]
-    df = df.fillna(0) 
+    # La limpieza final se mueve a main() para manejar la imputación de fines de semana.
     
     return df.drop(columns=['M2_Crecimiento_YoY_BASE', 'BAA', 'AAA'], errors='ignore')
 
@@ -224,24 +221,40 @@ def main():
         st.error(f"❌ Data loading error: {e}")
         return
 
-    # Cálculos del Score y Rendimiento
+    # Cálculos del Score (Solo días hábiles)
+    df_data = df_data.fillna(0) # Limpieza final de NaNs para el score
     df_data['Risk_Score'] = df_data.apply(
         lambda row: calcular_score_total(row, PONDERACIONES_FINALES), axis=1
     )
-    # 1. Mapear Score a Color para la barra de riesgo
-    df_data['Score_Color'] = df_data['Risk_Score'].apply(map_score_to_color)
-    # 2. Calcular la ALTURA de la barra en función del score (0 a MAX_BAR_HEIGHT)
-    df_data['Bar_Height'] = (df_data['Risk_Score'] / MAX_SCORE) * MAX_BAR_HEIGHT
-    
     df_data['Investment_Signal'] = np.where(df_data['Risk_Score'] >= UMBRAL_FINAL, 1, 0)
     df_data['Strategy_Return'] = df_data['Daily_Return'] * df_data['Investment_Signal']
     df_data['B&H_Return'] = df_data['Daily_Return']
     initial_capital = 100
     df_data['Strategy_Equity'] = initial_capital * (1 + df_data['Strategy_Return']).cumprod()
     df_data['B&H_Equity'] = initial_capital * (1 + df_data['B&H_Return']).cumprod()
+    
+    
+    # ======================================================================
+    # MANEJO DE DATOS PARA LA GRÁFICA (DÍAS CALENDARIO)
+    # ======================================================================
+    
+    # 1. Crear un índice de fechas que incluya TODOS los días (no solo hábiles)
+    full_date_range = pd.to_datetime(pd.date_range(start=START_DATE_FIXED, end=END_DATE_FIXED))
+    
+    # 2. Reindexar y rellenar solo las variables de Score y Equity (para la gráfica)
+    df_full_plot = df_data[['Risk_Score', 'Strategy_Equity', 'B&H_Equity']].reindex(full_date_range)
+    
+    # 3. Rellenar Score y Equity: el score y el equity se mantienen iguales durante fines de semana y feriados.
+    # Esto es CRÍTICO para eliminar los gaps en la barra de riesgo.
+    df_full_plot[['Risk_Score', 'Strategy_Equity', 'B&H_Equity']] = df_full_plot[['Risk_Score', 'Strategy_Equity', 'B&H_Equity']].ffill()
+    
+    # 4. Calcular el Color y la Altura para el DataFrame completo (incluyendo fines de semana)
+    df_full_plot['Score_Color'] = df_full_plot['Risk_Score'].apply(map_score_to_color)
+    df_full_plot['Bar_Height'] = (df_full_plot['Risk_Score'] / MAX_SCORE) * MAX_BAR_HEIGHT
+
 
     # ======================================================================
-    # Señal Operativa Actual
+    # Señal Operativa Actual (Usando el último día hábil)
     # ======================================================================
     
     ultimo_score = df_data['Risk_Score'].iloc[-1]
@@ -266,25 +279,26 @@ def main():
     
     # --- Lógica de la Barra de Riesgo (Corregida y Mejorada) ---
     
-    # 1. Plotear una barra discreta por cada día con el color y la altura variable
+    # 1. Plotear una barra discreta por cada día (incluyendo fines de semana) con color y altura variable
+    # Usamos ancho 1.0 y alineación al borde. La continuidad se asegura al usar el df_full_plot
     ax.bar(
-        df_data.index, 
-        height=df_data['Bar_Height'], 
+        df_full_plot.index, 
+        height=df_full_plot['Bar_Height'], 
         bottom=Y_BAR_BOTTOM_FIXED, 
-        color=df_data['Score_Color'], 
-        width=1.0, # Ancho de 1.0 para continuidad (rellena huecos de días no operados)
+        color=df_full_plot['Score_Color'], 
+        width=1.0, 
         align='edge', 
         edgecolor='none'
     )
     
     # 2. Ajustar el límite inferior del eje Y para que incluya la barra y un margen
-    # El valor más bajo será Y_BAR_BOTTOM_FIXED - 5 (70.0)
-    ax.set_ylim(bottom=Y_BAR_BOTTOM_FIXED - 5, top=df_data[['Strategy_Equity', 'B&H_Equity']].max().max() * 1.05)
+    # Esto soluciona la superposición (el SPX cae hasta 90, la barra empieza en 75)
+    ax.set_ylim(bottom=Y_BAR_BOTTOM_FIXED - 5, top=df_full_plot[['Strategy_Equity', 'B&H_Equity']].max().max() * 1.05)
     
     # 3. Agregar una etiqueta para identificar la barra
     ax.text(
-        df_data.index[0], 
-        Y_BAR_BOTTOM_FIXED - 2.5, # Posición justo encima del margen inferior
+        df_full_plot.index[0], 
+        Y_BAR_BOTTOM_FIXED - 2.5, 
         'Risk Zone', 
         fontsize=10, 
         color='#333333',
@@ -293,9 +307,9 @@ def main():
     
     # --------------------------------------------------
     
-    # Gráfica del Equity
-    ax.plot(df_data['Strategy_Equity'], label="DEYCO INDEX", color='green', linewidth=2.5)
-    ax.plot(df_data['B&H_Equity'], label="SPX (Buy & Hold)", color='red', linestyle='--', linewidth=1.5)
+    # Gráfica del Equity (Usamos df_full_plot para asegurar que las curvas de equity también tengan ffill en días sin datos, lo cual es estándar en gráficos de rendimiento)
+    ax.plot(df_full_plot['Strategy_Equity'], label="DEYCO INDEX", color='green', linewidth=2.5)
+    ax.plot(df_full_plot['B&H_Equity'], label="SPX (Buy & Hold)", color='red', linestyle='--', linewidth=1.5)
     
     # Formato de la gráfica
     ax.set_title(f'SPX vs DEYCO INDEX Performance', fontsize=16)
@@ -313,7 +327,7 @@ def main():
     st.markdown("---") 
 
     # ======================================================================
-    # Cuadro de Métricas
+    # Cuadro de Métricas (Usando el df original, solo días hábiles)
     # ======================================================================
     st.header("Key Performance Metrics")
     
