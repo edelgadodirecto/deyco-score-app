@@ -188,7 +188,6 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
 def main():
     
     # --- INYECCIÓN DE CSS PARA EL TÍTULO Y EL COLOR DE LA TABLA ---
-    # Se añade la corrección para asegurar el color negro en los encabezados de la tabla
     st.markdown(
         """
         <style>
@@ -203,17 +202,15 @@ def main():
         .score-box {
             white-space: pre-wrap;
         }
-        /* Color de texto oscuro para la tabla */
-        .stTable, .stDataFrame { 
+        /* Color de texto oscuro para la tabla (cuerpo de la tabla) */
+        .stTable, .stDataFrame, .stTable td, .stDataFrame td { 
             color: #333333 !important; 
         }
-        .stTable th, .stTable td, .stDataFrame th, .stDataFrame td {
-            color: #333333 !important; 
-        }
-        /* CORRECCIÓN: Asegurar texto negro en los encabezados de la tabla */
-        .st-emotion-cache-p5m94t th, .st-emotion-cache-12fmwz3 th {
+        /* CORRECCIÓN FINAL: Asegurar texto negro en los encabezados de la tabla (th) */
+        .stTable th, .stDataFrame th, th {
             color: #333333 !important; /* Texto negro */
             background-color: #FAFAFA !important; /* Fondo claro para contraste */
+            font-weight: bold;
         }
         </style>
         <h1 class="centered-title">DEYCO Risk Score v2.0</h1>
