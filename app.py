@@ -32,7 +32,7 @@ UMBRAL_FINAL = 70
 # Fechas Fijas
 START_DATE_FIXED = '2025-01-02' 
 END_DATE_FIXED = datetime.now().strftime('%Y-%m-%d')
-TODAY_DATE = datetime.now().strftime('%Y-%m-%d') # Nueva variable para la fecha actual
+TODAY_DATE = datetime.now().strftime('%Y-%m-%d') 
 
 # Parámetros para la BARRA DE RIESGO
 Y_BAR_BOTTOM_FIXED = 75.0 
@@ -188,7 +188,7 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
 def main():
     
     # --- INYECCIÓN DE CSS PARA EL TÍTULO Y EL COLOR DE LA TABLA ---
-    # Se añade estilo para colorear los títulos de la tabla
+    # Se añade la corrección para asegurar el color negro en los encabezados de la tabla
     st.markdown(
         """
         <style>
@@ -210,15 +210,10 @@ def main():
         .stTable th, .stTable td, .stDataFrame th, .stDataFrame td {
             color: #333333 !important; 
         }
-        /* Nuevo: Color del encabezado de la tabla (igual que Key Performance Metrics) */
-        .st-emotion-cache-p5m94t th {
-            color: #ff4b4b !important; /* Streamlit usa este color para encabezados por defecto, usaremos un color fijo */
-            color: #FAFAFA !important;
-            background-color: #333333 !important;
-        }
-        .st-emotion-cache-12fmwz3 th {
-            color: #FAFAFA !important;
-            background-color: #333333 !important;
+        /* CORRECCIÓN: Asegurar texto negro en los encabezados de la tabla */
+        .st-emotion-cache-p5m94t th, .st-emotion-cache-12fmwz3 th {
+            color: #333333 !important; /* Texto negro */
+            background-color: #FAFAFA !important; /* Fondo claro para contraste */
         }
         </style>
         <h1 class="centered-title">DEYCO Risk Score v2.0</h1>
@@ -235,7 +230,7 @@ def main():
         return
 
     # Cálculos del Score (Solo días hábiles)
-    df_data = df_data.fillna(0) # Limpieza final de NaNs para el score
+    df_data = df_data.fillna(0) 
     df_data['Risk_Score'] = df_data.apply(
         lambda row: calcular_score_total(row, PONDERACIONES_FINALES), axis=1
     )
@@ -255,7 +250,6 @@ def main():
     full_date_range = pd.to_datetime(pd.date_range(start=START_DATE_FIXED, end=END_DATE_FIXED))
     
     # 2. Reindexar y rellenar solo las variables de Score y Equity (para la gráfica)
-    # Reindexamos TODAS las columnas necesarias, incluyendo las de Equity
     cols_to_plot = ['Risk_Score', 'Strategy_Equity', 'B&H_Equity']
     df_full_plot = df_data[cols_to_plot].reindex(full_date_range)
     
@@ -321,7 +315,7 @@ def main():
     line_deyco, = ax.plot(df_full_plot['Strategy_Equity'], label="DEYCO INDEX", color='green', linewidth=2.5)
     line_spx, = ax.plot(df_full_plot['B&H_Equity'], label="SPX (Buy & Hold)", color='red', linestyle='--', linewidth=1.5)
     
-    # --- Puntos Finales y Valores (NUEVO) ---
+    # --- Puntos Finales y Valores ---
     
     # Obtener el último punto y valor
     last_date = df_full_plot.index[-1]
@@ -399,7 +393,7 @@ def main():
     
     st.table(df_metrics)
 
-    # --- Copyright (NUEVO) ---
+    # --- Copyright ---
     st.markdown(f"Both DYCO and DYCO INDEX were developed by DELGADO & COMPANY.")
     st.markdown(f"Copyright {datetime.now().year}. ©")
 
