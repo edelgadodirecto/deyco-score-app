@@ -30,9 +30,12 @@ MAX_SCORE = sum(PONDERACIONES_FINALES.values())
 UMBRAL_FINAL = 70 
 
 # Fechas Fijas
-# *** FECHA DE INICIO 2025-01-02 (CORREGIDO) ***
 START_DATE_FIXED = '2025-01-02' 
 END_DATE_FIXED = datetime.now().strftime('%Y-%m-%d')
+
+# Parámetros para la BARRA DE RIESGO (Ajustados para separación)
+Y_BAR_BOTTOM_FIXED = 75.0 # Nuevo fondo fijo, más bajo
+MAX_BAR_HEIGHT = 10.0 # Altura máxima cuando el score es MAX_SCORE (84)
 
 # Umbrales (Se mantienen)
 UMBRALES = {
@@ -110,6 +113,15 @@ def interpretar_score_actual(score: int, max_score: int) -> tuple:
         color = "#dc3545" # Rojo
     return estado, mensaje, color
 
+# Función para mapear score a color para la barra de riesgo
+def map_score_to_color(score: int) -> str:
+    if score >= 70:
+        return "#28a745" # Verde
+    elif score >= 56:
+        return "#ffc107" # Amarillo/Naranja
+    else: 
+        return "#dc3545" # Rojo
+
 # ======================================================================
 # 3. OBTENCIÓN Y PREPARACIÓN DE DATOS (Con caché)
 # ======================================================================
@@ -154,18 +166,18 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
     df = df.bfill()
     
     # 4.3. Calcular Retornos y Momentum (Ahora seguro, ya que SPX_Price no tiene NaNs iniciales)
-    # *Retornos son 0 si el precio se imputó (plano) o el cambio real si el precio es real.
     df['Daily_Return'] = df['SPX_Price'].pct_change().fillna(0) 
     df['Momentum_SPY'] = (df['SPX_Price'].pct_change(periods=5) * 100).fillna(0)
     
     # 4.4. Limpieza de indicadores restantes
-    df = df.ffill() # Relleno hacia adelante para FRED
+    # Rellenar FRED y otros NaNs. El ffill() es clave para rellenar los días sin datos de FRED
+    # y así asegurar que el Score se mantenga el día siguiente.
+    df = df.ffill() 
     df['M2_Crecimiento_YoY'] = df.get('M2_Crecimiento_YoY_BASE', pd.Series(0.0, index=df.index)).pct_change(periods=12) * 100
     df['HY_Spread'] = df.get('BAA', pd.Series(0.0, index=df.index)) - df.get('AAA', pd.Series(0.0, index=df.index))
     
     # 4.5. Limpieza final de NaNs (solo para asegurar que no queden datos incompletos en el medio)
     required_keys = [k for k, v in PONDERACIONES_FINALES.items() if v > 0 and k in df.columns]
-    # Usamos fillna(0) en lugar de dropna para mantener todas las filas si es posible
     df = df.fillna(0) 
     
     return df.drop(columns=['M2_Crecimiento_YoY_BASE', 'BAA', 'AAA'], errors='ignore')
@@ -216,6 +228,11 @@ def main():
     df_data['Risk_Score'] = df_data.apply(
         lambda row: calcular_score_total(row, PONDERACIONES_FINALES), axis=1
     )
+    # 1. Mapear Score a Color para la barra de riesgo
+    df_data['Score_Color'] = df_data['Risk_Score'].apply(map_score_to_color)
+    # 2. Calcular la ALTURA de la barra en función del score (0 a MAX_BAR_HEIGHT)
+    df_data['Bar_Height'] = (df_data['Risk_Score'] / MAX_SCORE) * MAX_BAR_HEIGHT
+    
     df_data['Investment_Signal'] = np.where(df_data['Risk_Score'] >= UMBRAL_FINAL, 1, 0)
     df_data['Strategy_Return'] = df_data['Daily_Return'] * df_data['Investment_Signal']
     df_data['B&H_Return'] = df_data['Daily_Return']
@@ -246,6 +263,35 @@ def main():
     # ======================================================================
     
     fig, ax = plt.subplots(figsize=(12, 6))
+    
+    # --- Lógica de la Barra de Riesgo (Corregida y Mejorada) ---
+    
+    # 1. Plotear una barra discreta por cada día con el color y la altura variable
+    ax.bar(
+        df_data.index, 
+        height=df_data['Bar_Height'], 
+        bottom=Y_BAR_BOTTOM_FIXED, 
+        color=df_data['Score_Color'], 
+        width=1.0, # Ancho de 1.0 para continuidad (rellena huecos de días no operados)
+        align='edge', 
+        edgecolor='none'
+    )
+    
+    # 2. Ajustar el límite inferior del eje Y para que incluya la barra y un margen
+    # El valor más bajo será Y_BAR_BOTTOM_FIXED - 5 (70.0)
+    ax.set_ylim(bottom=Y_BAR_BOTTOM_FIXED - 5, top=df_data[['Strategy_Equity', 'B&H_Equity']].max().max() * 1.05)
+    
+    # 3. Agregar una etiqueta para identificar la barra
+    ax.text(
+        df_data.index[0], 
+        Y_BAR_BOTTOM_FIXED - 2.5, # Posición justo encima del margen inferior
+        'Risk Zone', 
+        fontsize=10, 
+        color='#333333',
+        ha='left'
+    )
+    
+    # --------------------------------------------------
     
     # Gráfica del Equity
     ax.plot(df_data['Strategy_Equity'], label="DEYCO INDEX", color='green', linewidth=2.5)
