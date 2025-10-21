@@ -30,7 +30,8 @@ MAX_SCORE = sum(PONDERACIONES_FINALES.values())
 UMBRAL_FINAL = 70 
 
 # Fechas Fijas
-START_DATE_FIXED = '2025-01-01' 
+# !!! PUNTO 2 CORREGIDO: Fecha de inicio 2025-01-02
+START_DATE_FIXED = '2025-01-02' 
 END_DATE_FIXED = datetime.now().strftime('%Y-%m-%d')
 
 # Umbrales (Se mantienen)
@@ -160,7 +161,7 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
 
 def main():
     
-    # 1. TÍTULO CORREGIDO (Incluido en st.markdown para renderizado HTML)
+    # --- PUNTO 1 CORRECCIÓN: INYECCIÓN DE CSS PARA LA TABLA DE MÉTRICAS ---
     st.markdown(
         """
         <style>
@@ -175,10 +176,18 @@ def main():
         .score-box {
             white-space: pre-wrap;
         }
+        /* Estilo para st.table/dataframe (Punto 1: Color de texto oscuro) */
+        .stTable * { 
+            color: #333333 !important; /* Gris muy oscuro */
+        }
+        .dataframe th, .dataframe td {
+            color: #333333 !important; /* Asegura el color en las celdas */
+        }
         </style>
         <h1 class="centered-title">DEYCO Risk Score v2.0</h1>
         """, unsafe_allow_html=True
     )
+    # --------------------------------------------------------------------
     
     # Ejecutar Backtest
     try:
@@ -238,9 +247,6 @@ def main():
     
     ax.legend(loc='upper left')
     ax.grid(True, which="both", ls="--", c='0.7')
-    
-    # 2. LÍNEA CORREGIDA: Eliminamos la línea que causaba el AttributeError
-    # ax.ticklabel_format(style='plain', axis='x') 
     
     st.pyplot(fig)
     st.markdown("---") 
