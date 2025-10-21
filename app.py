@@ -5,7 +5,7 @@ from datetime import datetime
 import streamlit as st
 import matplotlib.pyplot as plt
 import pandas_datareader.data as web 
-import matplotlib.ticker as ticker # Necesario para formatear el eje Y de la gráfica
+import matplotlib.ticker as ticker 
 
 # ======================================================================
 # 0. CONFIGURACIÓN DEL SITIO WEB
@@ -29,11 +29,7 @@ PONDERACIONES_FINALES = {
 MAX_SCORE = sum(PONDERACIONES_FINALES.values())
 UMBRAL_FINAL = 70 
 
-# Fechas Fijas (Punto 6: La fecha de inicio DEBE ser 01-01-2025)
-# **NOTA CRÍTICA:** Al usar 2025-01-01 como fecha de inicio, 
-# el backtest tendrá muy pocos días de datos (ya que hoy es 2025-10-20),
-# lo cual puede hacer que las métricas (Sharpe, MDD, etc.) sean inestables.
-# MANTENGO LA FECHA SOLICITADA:
+# Fechas Fijas
 START_DATE_FIXED = '2025-01-01' 
 END_DATE_FIXED = datetime.now().strftime('%Y-%m-%d')
 
@@ -97,9 +93,6 @@ def calcular_score_total(row: pd.Series, ponderaciones_actuales: dict) -> int:
     
     return round(min(score, MAX_SCORE))
 
-# ======================================================================
-# FUNCIÓN DE COMUNICACIÓN MODIFICADA (Punto 4)
-# ======================================================================
 def interpretar_score_actual(score: int, max_score: int) -> tuple:
     """Traduce el score numérico a un estado operativo con el formato solicitado."""
     if score >= 70:
@@ -122,7 +115,7 @@ def interpretar_score_actual(score: int, max_score: int) -> tuple:
 
 @st.cache_data
 def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFrame:
-    # Lógica de descarga y preparación de datos se mantiene
+    
     TICKER_SPX = '^GSPC'
     # 1. Descarga de datos del S&P 500
     data = yf.download(TICKER_SPX, start=start_date, end=end_date, progress=False)
@@ -151,7 +144,7 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
         except Exception: 
             pass 
             
-    # 4. Limpieza y Creación de Spreads (Ajustes de robustez)
+    # 4. Limpieza y Creación de Spreads
     df = df.ffill()
     df['M2_Crecimiento_YoY'] = df.get('M2_Crecimiento_YoY_BASE', pd.Series(0.0, index=df.index)).pct_change(periods=12) * 100
     df['HY_Spread'] = df.get('BAA', pd.Series(0.0, index=df.index)) - df.get('AAA', pd.Series(0.0, index=df.index))
@@ -167,7 +160,7 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
 
 def main():
     
-    # 1. TÍTULO MODIFICADO Y CENTRADO
+    # 1. TÍTULO CORREGIDO (Incluido en st.markdown para renderizado HTML)
     st.markdown(
         """
         <style>
@@ -180,13 +173,12 @@ def main():
             padding-bottom: 0;
         }
         .score-box {
-            white-space: pre-wrap; /* Permite saltos de línea (\n) en el mensaje */
+            white-space: pre-wrap;
         }
         </style>
         <h1 class="centered-title">DEYCO Risk Score v2.0</h1>
         """, unsafe_allow_html=True
     )
-    # 2. SECCIONES ELIMINADAS: (Data-Driven...) y (Periodo de Backtest Fijo...)
     
     # Ejecutar Backtest
     try:
@@ -196,7 +188,7 @@ def main():
         st.error(f"❌ Data loading error: {e}")
         return
 
-    # Cálculos del Score y Rendimiento (Se mantienen)
+    # Cálculos del Score y Rendimiento
     df_data['Risk_Score'] = df_data.apply(
         lambda row: calcular_score_total(row, PONDERACIONES_FINALES), axis=1
     )
@@ -208,13 +200,13 @@ def main():
     df_data['B&H_Equity'] = initial_capital * (1 + df_data['B&H_Return']).cumprod()
 
     # ======================================================================
-    # PUNTO 4: Señal Operativa Actual (Sin encabezado '1.', con nuevo formato)
+    # Señal Operativa Actual
     # ======================================================================
     
     ultimo_score = df_data['Risk_Score'].iloc[-1]
     estado_operativo, mensaje_operativo, color = interpretar_score_actual(ultimo_score, MAX_SCORE)
     
-    # Mostrar el score con formato de semáforo (Usando la clase score-box)
+    # Mostrar el score con formato de semáforo
     st.markdown(
         f"""
         <div style="background-color: {color}; padding: 25px; border-radius: 10px; color: white;">
@@ -223,55 +215,47 @@ def main():
         </div>
         """, unsafe_allow_html=True
     )
-    st.markdown("---") # Separador visual
+    st.markdown("---") 
 
     # ======================================================================
-    # PUNTOS 5, 7, 8, 9, 10, 11, 12: Gráfica
+    # Gráfica
     # ======================================================================
-    # 5. Quitar título "2. Curva de Capital Comparativa (Base 100)"
     
     fig, ax = plt.subplots(figsize=(12, 6))
     
     # Gráfica del Equity
-    # 11. Cambiar línea verde de DEYCO (Score V2.0) a DEYCO INDEX
     ax.plot(df_data['Strategy_Equity'], label="DEYCO INDEX", color='green', linewidth=2.5)
-    # 12. Cambiar línea roja de S&P 500 (Buy & Hold) a SPX (Buy & Hold)
     ax.plot(df_data['B&H_Equity'], label="SPX (Buy & Hold)", color='red', linestyle='--', linewidth=1.5)
     
-    # 7. Cambiar el título de la gráfica
+    # Formato de la gráfica
     ax.set_title(f'SPX vs DEYCO INDEX Performance', fontsize=16)
-    
-    # 10. Cambiar título del eje X
     ax.set_xlabel('Date')
-    
-    # 8. Cambiar título del eje Y
     ax.set_ylabel('Equity')
     
-    # 9. Anteponer el signo de pesos ($) al eje Y
+    # Anteponer el signo de pesos ($) al eje Y
     formatter = ticker.StrMethodFormatter('${x:,.0f}')
     ax.yaxis.set_major_formatter(formatter)
     
     ax.legend(loc='upper left')
     ax.grid(True, which="both", ls="--", c='0.7')
-    ax.ticklabel_format(style='plain', axis='x') # Dejamos el eje X simple
+    
+    # 2. LÍNEA CORREGIDA: Eliminamos la línea que causaba el AttributeError
+    # ax.ticklabel_format(style='plain', axis='x') 
     
     st.pyplot(fig)
-    st.markdown("---") # Separador visual
+    st.markdown("---") 
 
     # ======================================================================
-    # PUNTOS 13, 15, 16: Cuadro de Métricas
+    # Cuadro de Métricas
     # ======================================================================
-    # 13. Cambiar título: 3. Métricas de Rendimiento Clave a Key Performance Metrics
     st.header("Key Performance Metrics")
     
     metrics_deyco = calculate_metrics(df_data, 'Strategy_Equity', 'Strategy_Return')
     metrics_spx = calculate_metrics(df_data.assign(Investment_Signal=1), 'B&H_Equity', 'B&H_Return')
     
     # Crear la tabla de métricas
-    # 16. Cambiar nombres de las métricas (filas)
     data_metrics = {
         'Metrics': ['Annualized CAGR (ROI)', 'Sharpe Ratio', 'Maximum Drawdown', 'Annual Volatility', 'Time Invested'],
-        # 15. Cambiar título columna 2
         'SPX (B&H)': [
             f"{metrics_spx['CAGR']*100:.2f}%", 
             f"{metrics_spx['Sharpe']:.2f}", 
@@ -279,7 +263,6 @@ def main():
             f"{metrics_spx['Volatilidad']*100:.2f}%", 
             f"{metrics_spx['Tiempo Inv.']:.2f}%"
         ],
-        # 15. Cambiar título columna 3
         'DEYCO INDEX': [
             f"{metrics_deyco['CAGR']*100:.2f}%", 
             f"{metrics_deyco['Sharpe']:.2f}", 
@@ -288,13 +271,10 @@ def main():
             f"{metrics_deyco['Tiempo Inv.']:.2f}%"
         ]
     }
-    # Usamos 'Metrics' (Punto 15) como índice de fila
     df_metrics = pd.DataFrame(data_metrics).set_index('Metrics')
     
     st.table(df_metrics)
-    
-    # 14. Quitar el texto del final ("💡 DEYCO logra rendimientos...")
-    # st.markdown("---") # Quitamos la línea divisoria extra también
+
 
 if __name__ == "__main__":
     main()
