@@ -30,7 +30,7 @@ MAX_SCORE = sum(PONDERACIONES_FINALES.values())
 UMBRAL_FINAL = 70 
 
 # Fechas Fijas
-# !!! PUNTO 2 CORREGIDO: Fecha de inicio 2025-01-02
+# *** FECHA DE INICIO 2025-01-02 (CORREGIDO) ***
 START_DATE_FIXED = '2025-01-02' 
 END_DATE_FIXED = datetime.now().strftime('%Y-%m-%d')
 
@@ -118,14 +118,13 @@ def interpretar_score_actual(score: int, max_score: int) -> tuple:
 def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFrame:
     
     TICKER_SPX = '^GSPC'
-    # 1. Descarga de datos del S&P 500
+    
+    # 1. Descarga del S&P 500
     data = yf.download(TICKER_SPX, start=start_date, end=end_date, progress=False)
     if data.empty: raise ValueError("No se obtuvieron datos válidos del S&P 500.")
     
     if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.droplevel(1) 
     df = data[['Close']].rename(columns={'Close': 'SPX_Price'}).copy()
-    df['Daily_Return'] = df['SPX_Price'].pct_change()
-    df['Momentum_SPY'] = (df['SPX_Price'].pct_change(periods=5) * 100)
     df.index = pd.to_datetime(df.index) 
     
     # 2. Descarga de indicadores de Yahoo Finance
@@ -136,7 +135,7 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
             if isinstance(data_yf.columns, pd.MultiIndex): data_yf.columns = data_yf.columns.droplevel(1) 
             df = df.join(data_yf['Close'].rename(name), how='left')
     
-    # 3. Descarga de indicadores de FRED (requiere pandas_datareader)
+    # 3. Descarga de indicadores de FRED
     tickers_fred = {'WM2NS': 'M2_Crecimiento_YoY_BASE', 'BAA': 'BAA', 'AAA': 'AAA', 'DRALACBS': 'Tasa_Morosidad', 'NFCI': 'FCI_Endurecimiento'}
     for ticker, name in tickers_fred.items():
         try:
@@ -145,13 +144,29 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
         except Exception: 
             pass 
             
-    # 4. Limpieza y Creación de Spreads
-    df = df.ffill()
+    # 4. LIMPIEZA CRÍTICA Y RELLENO PARA FORZAR LA FECHA DE INICIO
+    
+    # 4.1. Definir rango de fechas y reindexar (añade NaNs antes de la fecha real de inicio de datos)
+    date_range = pd.to_datetime(pd.bdate_range(start=start_date, end=end_date))
+    df = df.reindex(date_range)
+    
+    # 4.2. Rellenar con el primer valor hacia atrás para forzar que el precio inicial se mantenga
+    df = df.bfill()
+    
+    # 4.3. Calcular Retornos y Momentum (Ahora seguro, ya que SPX_Price no tiene NaNs iniciales)
+    # *Retornos son 0 si el precio se imputó (plano) o el cambio real si el precio es real.
+    df['Daily_Return'] = df['SPX_Price'].pct_change().fillna(0) 
+    df['Momentum_SPY'] = (df['SPX_Price'].pct_change(periods=5) * 100).fillna(0)
+    
+    # 4.4. Limpieza de indicadores restantes
+    df = df.ffill() # Relleno hacia adelante para FRED
     df['M2_Crecimiento_YoY'] = df.get('M2_Crecimiento_YoY_BASE', pd.Series(0.0, index=df.index)).pct_change(periods=12) * 100
     df['HY_Spread'] = df.get('BAA', pd.Series(0.0, index=df.index)) - df.get('AAA', pd.Series(0.0, index=df.index))
     
+    # 4.5. Limpieza final de NaNs (solo para asegurar que no queden datos incompletos en el medio)
     required_keys = [k for k, v in PONDERACIONES_FINALES.items() if v > 0 and k in df.columns]
-    df = df.dropna(subset=['SPX_Price', 'Daily_Return'] + required_keys).fillna(0)
+    # Usamos fillna(0) en lugar de dropna para mantener todas las filas si es posible
+    df = df.fillna(0) 
     
     return df.drop(columns=['M2_Crecimiento_YoY_BASE', 'BAA', 'AAA'], errors='ignore')
 
@@ -161,7 +176,7 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
 
 def main():
     
-    # --- PUNTO 1 CORRECCIÓN: INYECCIÓN DE CSS PARA LA TABLA DE MÉTRICAS ---
+    # --- INYECCIÓN DE CSS PARA EL TÍTULO Y EL COLOR DE LA TABLA ---
     st.markdown(
         """
         <style>
@@ -176,12 +191,12 @@ def main():
         .score-box {
             white-space: pre-wrap;
         }
-        /* Estilo para st.table/dataframe (Punto 1: Color de texto oscuro) */
-        .stTable * { 
-            color: #333333 !important; /* Gris muy oscuro */
+        /* Color de texto oscuro para la tabla */
+        .stTable, .stDataFrame { 
+            color: #333333 !important; 
         }
-        .dataframe th, .dataframe td {
-            color: #333333 !important; /* Asegura el color en las celdas */
+        .stTable th, .stTable td, .stDataFrame th, .stDataFrame td {
+            color: #333333 !important; 
         }
         </style>
         <h1 class="centered-title">DEYCO Risk Score v2.0</h1>
