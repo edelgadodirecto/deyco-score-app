@@ -4,14 +4,15 @@ import yfinance as yf
 from datetime import datetime
 import streamlit as st
 import matplotlib.pyplot as plt
-import pandas_datareader.data as web # Necesario para obtener datos de FRED
+import pandas_datareader.data as web 
+import matplotlib.ticker as ticker # Necesario para formatear el eje Y de la gráfica
 
 # ======================================================================
 # 0. CONFIGURACIÓN DEL SITIO WEB
 # ======================================================================
 
 st.set_page_config(
-    page_title="DEYCO - Score de Riesgo Lineal V2.0",
+    page_title="DEYCO Risk Score v2.0",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -28,12 +29,15 @@ PONDERACIONES_FINALES = {
 MAX_SCORE = sum(PONDERACIONES_FINALES.values())
 UMBRAL_FINAL = 70 
 
-# Fechas Fijas
-# Usamos un rango histórico fuerte (incluye la GFC 2008 y la bonanza post-2010)
-START_DATE_FIXED = '2007-01-01' 
+# Fechas Fijas (Punto 6: La fecha de inicio DEBE ser 01-01-2025)
+# **NOTA CRÍTICA:** Al usar 2025-01-01 como fecha de inicio, 
+# el backtest tendrá muy pocos días de datos (ya que hoy es 2025-10-20),
+# lo cual puede hacer que las métricas (Sharpe, MDD, etc.) sean inestables.
+# MANTENGO LA FECHA SOLICITADA:
+START_DATE_FIXED = '2025-01-01' 
 END_DATE_FIXED = datetime.now().strftime('%Y-%m-%d')
 
-# Umbrales (Necesarios para el cálculo del score)
+# Umbrales (Se mantienen)
 UMBRALES = {
     "Momentum_SPY": [-5.00, 0.00, False], "HY_Spread": [6.00, 3.00, True],
     "MOVE_Index": [150.00, 75.00, True], "GEX_Agregado": [-1.0, 1.0, False],
@@ -52,7 +56,6 @@ def calculate_metrics(df: pd.DataFrame, equity_col: str, daily_return_col: str, 
     if len(df) < 2: return {'CAGR': 0, 'Sharpe': 0, 'MDD': 0, 'Volatilidad': 0, 'Tiempo Inv.': 0}
     
     total_days = (df.index[-1] - df.index[0]).days
-    # Usamos total_days+1 para evitar división por cero si el rango es muy corto
     if total_days == 0: total_days = 1 
     
     cagr = ((df[equity_col].iloc[-1] / df[equity_col].iloc[0]) ** (365.25 / total_days)) - 1
@@ -69,7 +72,7 @@ def calculate_metrics(df: pd.DataFrame, equity_col: str, daily_return_col: str, 
     }
 
 def calcular_score_componente(valor: float, nombre_comp: str, ponderacion: float) -> float:
-    """Calcula la contribución de un componente con la ponderación final."""
+    # Lógica de score se mantiene
     P_MAX = ponderacion
     if P_MAX == 0: return 0.0
     U_PELIGRO, U_SEGURIDAD, RIESGO_ALTO = UMBRALES.get(nombre_comp, [0, 0, False])
@@ -85,7 +88,7 @@ def calcular_score_componente(valor: float, nombre_comp: str, ponderacion: float
     return contribucion_norm * P_MAX
 
 def calcular_score_total(row: pd.Series, ponderaciones_actuales: dict) -> int:
-    """Calcula el score total con las ponderaciones finales."""
+    # Lógica de score total se mantiene
     score = 0.0
     for comp, weight in ponderaciones_actuales.items():
         if weight > 0 and comp in row.index:
@@ -94,19 +97,22 @@ def calcular_score_total(row: pd.Series, ponderaciones_actuales: dict) -> int:
     
     return round(min(score, MAX_SCORE))
 
+# ======================================================================
+# FUNCIÓN DE COMUNICACIÓN MODIFICADA (Punto 4)
+# ======================================================================
 def interpretar_score_actual(score: int, max_score: int) -> tuple:
-    """Traduce el score numérico a un estado operativo (Semáforo)."""
+    """Traduce el score numérico a un estado operativo con el formato solicitado."""
     if score >= 70:
-        estado = "BAJO RIESGO/COMPRA (Go)"
-        mensaje = f"✅ El Score de Riesgo DEYCO está en ZONA VERDE. El entorno es favorable para la Renta Variable (Score: {score}/{max_score})."
+        estado = "LOW RISK / BUY"
+        mensaje = f"GREEN ZONE for SPX\nDEYCO Score: {score} / {max_score}"
         color = "#28a745" # Verde
     elif score >= 56:
-        estado = "RIESGO ALTO (Espera)"
-        mensaje = f"⚠️ El Score de Riesgo DEYCO está en ZONA AMARILLA. Se recomienda MANTENERSE EN CAJA o ser cauteloso (Score: {score}/{max_score})."
+        estado = "HIGH RISK / STAND ASIDE"
+        mensaje = f"YELLOW ZONE for SPX\nDEYCO Score: {score} / {max_score}"
         color = "#ffc107" # Amarillo/Naranja
     else: 
-        estado = "RIESGO EXTREMO (Stop)"
-        mensaje = f"❌ El Score de Riesgo DEYCO está en ZONA ROJA. La gestión de riesgo exige ESTAR FUERA DEL MERCADO (Score: {score}/{max_score})."
+        estado = "EXTREME RISK / SELL"
+        mensaje = f"RED ZONE for SPX\nDEYCO Score: {score} / {max_score}"
         color = "#dc3545" # Rojo
     return estado, mensaje, color
 
@@ -116,7 +122,7 @@ def interpretar_score_actual(score: int, max_score: int) -> tuple:
 
 @st.cache_data
 def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFrame:
-    
+    # Lógica de descarga y preparación de datos se mantiene
     TICKER_SPX = '^GSPC'
     # 1. Descarga de datos del S&P 500
     data = yf.download(TICKER_SPX, start=start_date, end=end_date, progress=False)
@@ -140,18 +146,17 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
     tickers_fred = {'WM2NS': 'M2_Crecimiento_YoY_BASE', 'BAA': 'BAA', 'AAA': 'AAA', 'DRALACBS': 'Tasa_Morosidad', 'NFCI': 'FCI_Endurecimiento'}
     for ticker, name in tickers_fred.items():
         try:
-            # web.DataReader es la función que usa pandas_datareader
             data_fred = web.DataReader(ticker, 'fred', start=start_date)
             df = df.join(data_fred.rename(columns={ticker: name}), how='left')
         except Exception: 
             pass 
             
-    # 4. Limpieza y Creación de Spreads
+    # 4. Limpieza y Creación de Spreads (Ajustes de robustez)
     df = df.ffill()
-    df['M2_Crecimiento_YoY'] = df['M2_Crecimiento_YoY_BASE'].pct_change(periods=12) * 100
-    df['HY_Spread'] = df.get('BAA', 0) - df.get('AAA', 0)
+    df['M2_Crecimiento_YoY'] = df.get('M2_Crecimiento_YoY_BASE', pd.Series(0.0, index=df.index)).pct_change(periods=12) * 100
+    df['HY_Spread'] = df.get('BAA', pd.Series(0.0, index=df.index)) - df.get('AAA', pd.Series(0.0, index=df.index))
     
-    required_keys = [k for k, v in PONDERACIONES_FINALES.items() if v > 0]
+    required_keys = [k for k, v in PONDERACIONES_FINALES.items() if v > 0 and k in df.columns]
     df = df.dropna(subset=['SPX_Price', 'Daily_Return'] + required_keys).fillna(0)
     
     return df.drop(columns=['M2_Crecimiento_YoY_BASE', 'BAA', 'AAA'], errors='ignore')
@@ -162,19 +167,36 @@ def obtener_datos_historicos_final(start_date: str, end_date: str) -> pd.DataFra
 
 def main():
     
-    st.title("DEYCO: Score de Riesgo Lineal V2.0")
-    st.markdown(f"*(Data-Driven Economic Yield and Capital Optimization)*")
-    st.markdown(f"**Periodo de Backtest Fijo:** `{START_DATE_FIXED}` a `{END_DATE_FIXED}`")
-
+    # 1. TÍTULO MODIFICADO Y CENTRADO
+    st.markdown(
+        """
+        <style>
+        .centered-title {
+            text-align: center;
+            font-family: sans-serif;
+            font-size: 24px;
+            font-weight: 300;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .score-box {
+            white-space: pre-wrap; /* Permite saltos de línea (\n) en el mensaje */
+        }
+        </style>
+        <h1 class="centered-title">DEYCO Risk Score v2.0</h1>
+        """, unsafe_allow_html=True
+    )
+    # 2. SECCIONES ELIMINADAS: (Data-Driven...) y (Periodo de Backtest Fijo...)
+    
     # Ejecutar Backtest
     try:
-        with st.spinner('Cargando datos históricos y ejecutando backtest...'):
+        with st.spinner('Loading historical data and running backtest...'):
             df_data = obtener_datos_historicos_final(START_DATE_FIXED, END_DATE_FIXED)
     except ValueError as e:
-        st.error(f"❌ Error al cargar datos: {e}")
+        st.error(f"❌ Data loading error: {e}")
         return
 
-    # Cálculos del Score y Rendimiento
+    # Cálculos del Score y Rendimiento (Se mantienen)
     df_data['Risk_Score'] = df_data.apply(
         lambda row: calcular_score_total(row, PONDERACIONES_FINALES), axis=1
     )
@@ -186,63 +208,79 @@ def main():
     df_data['B&H_Equity'] = initial_capital * (1 + df_data['B&H_Return']).cumprod()
 
     # ======================================================================
-    # PUNTO 1 & 2: Señal Operativa Actual
+    # PUNTO 4: Señal Operativa Actual (Sin encabezado '1.', con nuevo formato)
     # ======================================================================
-    st.header("1. Señal Operativa Actual")
     
     ultimo_score = df_data['Risk_Score'].iloc[-1]
     estado_operativo, mensaje_operativo, color = interpretar_score_actual(ultimo_score, MAX_SCORE)
     
-    # Mostrar el score con formato de semáforo
+    # Mostrar el score con formato de semáforo (Usando la clase score-box)
     st.markdown(
         f"""
         <div style="background-color: {color}; padding: 25px; border-radius: 10px; color: white;">
             <h2 style="margin: 0; text-align: center; font-size: 2em;">{estado_operativo}</h2>
-            <p style="margin: 0; text-align: center; font-size: 1.3em; margin-top: 5px;">{mensaje_operativo}</p>
+            <p class="score-box" style="margin: 0; text-align: center; font-size: 1.3em; margin-top: 5px;">{mensaje_operativo}</p>
         </div>
         """, unsafe_allow_html=True
     )
+    st.markdown("---") # Separador visual
 
     # ======================================================================
-    # PUNTO 3: Gráfica comparativa (DEYCO vs SPX)
+    # PUNTOS 5, 7, 8, 9, 10, 11, 12: Gráfica
     # ======================================================================
-    st.header("2. Curva de Capital Comparativa (Base 100)")
+    # 5. Quitar título "2. Curva de Capital Comparativa (Base 100)"
     
     fig, ax = plt.subplots(figsize=(12, 6))
     
     # Gráfica del Equity
-    ax.plot(df_data['Strategy_Equity'], label="DEYCO (Score V2.0)", color='green', linewidth=2.5)
-    ax.plot(df_data['B&H_Equity'], label="S&P 500 (Buy & Hold)", color='red', linestyle='--', linewidth=1.5)
+    # 11. Cambiar línea verde de DEYCO (Score V2.0) a DEYCO INDEX
+    ax.plot(df_data['Strategy_Equity'], label="DEYCO INDEX", color='green', linewidth=2.5)
+    # 12. Cambiar línea roja de S&P 500 (Buy & Hold) a SPX (Buy & Hold)
+    ax.plot(df_data['B&H_Equity'], label="SPX (Buy & Hold)", color='red', linestyle='--', linewidth=1.5)
     
-    # Formato de la gráfica (Escala Lineal solicitada)
-    ax.set_title(f'DEYCO: Rendimiento vs S&P 500 ({START_DATE_FIXED} - {END_DATE_FIXED})', fontsize=16)
-    ax.set_xlabel('Fecha')
-    ax.set_ylabel('Equity (Valor en Cientos o Miles)')
+    # 7. Cambiar el título de la gráfica
+    ax.set_title(f'SPX vs DEYCO INDEX Performance', fontsize=16)
+    
+    # 10. Cambiar título del eje X
+    ax.set_xlabel('Date')
+    
+    # 8. Cambiar título del eje Y
+    ax.set_ylabel('Equity')
+    
+    # 9. Anteponer el signo de pesos ($) al eje Y
+    formatter = ticker.StrMethodFormatter('${x:,.0f}')
+    ax.yaxis.set_major_formatter(formatter)
+    
     ax.legend(loc='upper left')
     ax.grid(True, which="both", ls="--", c='0.7')
-    ax.ticklabel_format(style='plain', axis='y') # Sin notación científica
+    ax.ticklabel_format(style='plain', axis='x') # Dejamos el eje X simple
     
     st.pyplot(fig)
-    
+    st.markdown("---") # Separador visual
+
     # ======================================================================
-    # PUNTO 4: Cuadro de Métricas
+    # PUNTOS 13, 15, 16: Cuadro de Métricas
     # ======================================================================
-    st.header("3. Métricas de Rendimiento Clave")
+    # 13. Cambiar título: 3. Métricas de Rendimiento Clave a Key Performance Metrics
+    st.header("Key Performance Metrics")
     
     metrics_deyco = calculate_metrics(df_data, 'Strategy_Equity', 'Strategy_Return')
     metrics_spx = calculate_metrics(df_data.assign(Investment_Signal=1), 'B&H_Equity', 'B&H_Return')
     
     # Crear la tabla de métricas
+    # 16. Cambiar nombres de las métricas (filas)
     data_metrics = {
-        'Métrica': ['CAGR Anualizado (ROI)', 'Sharpe Ratio', 'MDD Máximo', 'Volatilidad Anual', 'Tiempo Invertido'],
-        'S&P 500 (B&H)': [
+        'Metrics': ['Annualized CAGR (ROI)', 'Sharpe Ratio', 'Maximum Drawdown', 'Annual Volatility', 'Time Invested'],
+        # 15. Cambiar título columna 2
+        'SPX (B&H)': [
             f"{metrics_spx['CAGR']*100:.2f}%", 
             f"{metrics_spx['Sharpe']:.2f}", 
             f"{metrics_spx['MDD']*100:.2f}%", 
             f"{metrics_spx['Volatilidad']*100:.2f}%", 
             f"{metrics_spx['Tiempo Inv.']:.2f}%"
         ],
-        'DEYCO (Score V2.0)': [
+        # 15. Cambiar título columna 3
+        'DEYCO INDEX': [
             f"{metrics_deyco['CAGR']*100:.2f}%", 
             f"{metrics_deyco['Sharpe']:.2f}", 
             f"{metrics_deyco['MDD']*100:.2f}%", 
@@ -250,13 +288,13 @@ def main():
             f"{metrics_deyco['Tiempo Inv.']:.2f}%"
         ]
     }
-    df_metrics = pd.DataFrame(data_metrics).set_index('Métrica')
+    # Usamos 'Metrics' (Punto 15) como índice de fila
+    df_metrics = pd.DataFrame(data_metrics).set_index('Metrics')
     
     st.table(df_metrics)
     
-    st.markdown("---")
-    st.markdown("💡 *DEYCO logra rendimientos muy superiores con menor riesgo al salir del mercado cuando el Score cae por debajo de 70 puntos (Zona Amarilla/Roja).*")
-
+    # 14. Quitar el texto del final ("💡 DEYCO logra rendimientos...")
+    # st.markdown("---") # Quitamos la línea divisoria extra también
 
 if __name__ == "__main__":
     main()
